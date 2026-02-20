@@ -1,4 +1,4 @@
-use tauri::{menu::{MenuBuilder, MenuItemBuilder}, tray::TrayIconBuilder, Manager, State, WindowEvent};
+use tauri::{menu::{MenuBuilder, MenuItemBuilder}, tray::TrayIconBuilder, Manager, State, WindowEvent, Emitter};
 use fs_extra::dir::CopyOptions;
 use std::sync::Mutex;
 use winreg::enums::*;
@@ -11,8 +11,10 @@ pub struct AppState {
 }
 
 #[tauri::command]
-fn add_to_copy_list(path: String, state: State<'_, AppState>) {
-    state.copy_list.lock().unwrap().push(path);
+fn add_to_copy_list(path: String, state: State<'_, AppState>, app: AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("list_updated", ());
+    }
 }
 
 #[tauri::command]
@@ -21,13 +23,18 @@ fn get_copy_list(state: State<'_, AppState>) -> Vec<String> {
 }
 
 #[tauri::command]
-fn clear_copy_list(state: State<'_, AppState>) {
-    state.copy_list.lock().unwrap().clear();
+fn clear_copy_list(state: State<'_, AppState>, app: AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("list_updated", ());
+    }
 }
 
 #[tauri::command]
-fn remove_from_copy_list(path: String, state: State<'_, AppState>) {
+fn remove_from_copy_list(path: String, state: State<'_, AppState>, app: AppHandle) {
     state.copy_list.lock().unwrap().retain(|x| x != &path);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("list_updated", ());
+    }
 }
 
 #[tauri::command]
@@ -46,14 +53,13 @@ fn copy_items(sources: Vec<String>, destination: String) -> Result<(), String> {
 fn handle_context_menu_command(app_handle: &AppHandle, args: &[String]) {
     if args.len() > 1 {
         let state = app_handle.state::<AppState>();
-        let window = app_handle.get_webview_window("main").unwrap();
+        let mut needs_ui_update = false; // Flag to track if we need to emit
 
         match args[1].as_str() {
             "--copy" => {
                 if let Some(path) = args.get(2) {
                     state.copy_list.lock().unwrap().push(path.clone());
-                    window.show().unwrap();
-                    window.set_focus().unwrap();
+                    needs_ui_update = true;
                 }
             }
             "--paste" => {
@@ -64,6 +70,7 @@ fn handle_context_menu_command(app_handle: &AppHandle, args: &[String]) {
                             Ok(_) => {
                                 println!("Successfully pasted files.");
                                 state.copy_list.lock().unwrap().clear();
+                                needs_ui_update = true; // Update UI after paste+clear
                             }
                             Err(e) => {
                                 println!("Error pasting files: {}", e);
@@ -73,6 +80,16 @@ fn handle_context_menu_command(app_handle: &AppHandle, args: &[String]) {
                 }
             }
             _ => {}
+        }
+
+        // --- Handle Window and Event Logic ---
+        if needs_ui_update {
+            if let Some(window) = app_handle.get_webview_window("main") {
+                println!("Successfully updated ui.");
+                let _ = window.emit("list_updated", ());
+                window.show().unwrap();
+                window.set_focus().unwrap();
+            }
         }
     }
 }

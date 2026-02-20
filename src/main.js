@@ -1,13 +1,16 @@
-const { invoke } = window.__TAURI__.tauri;
-const { appWindow } = window.__TAURI__.window;
+const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
 
-const fileListEl = document.getElementById("file-list");
-const clearListBtn = document.getElementById("clear-list-btn");
+
+let fileListEl;
+let clearListBtn;
 
 async function refreshFileList() {
+  if (!fileListEl) return;
+  
   fileListEl.innerHTML = "";
   const files = await invoke("get_copy_list");
-
+  
   if (files.length === 0) {
     const placeholder = document.createElement("li");
     placeholder.className = "placeholder";
@@ -27,7 +30,8 @@ async function refreshFileList() {
       deleteButton.onclick = async (e) => {
         e.stopPropagation();
         await invoke("remove_from_copy_list", { path: filePath });
-        refreshFileList();
+        // The event will trigger refreshFileList(), but we can also call it directly for immediate feedback
+        await refreshFileList();
       };
 
       listItem.appendChild(deleteButton);
@@ -36,19 +40,33 @@ async function refreshFileList() {
   }
 }
 
-clearListBtn.addEventListener("click", async () => {
-  await invoke("clear_copy_list");
-  refreshFileList();
-});
+// Initialize when DOM is ready
+window.addEventListener("DOMContentLoaded", async () => {
+  fileListEl = document.getElementById("file-list");
+  clearListBtn = document.getElementById("clear-list-btn");
 
-// Refresh the list when the window gets focus, which happens when it's shown.
-appWindow.onFocusChanged(({ payload: focused }) => {
-    if (focused) {
-        refreshFileList();
-    }
-});
+  if (!fileListEl || !clearListBtn) {
+    console.error("Required DOM elements not found");
+    return;
+  }
 
-// Initial load
-window.addEventListener("DOMContentLoaded", () => {
-  refreshFileList();
+  // Set up event listener for backend updates
+  try {
+    await listen("list_updated", () => {
+      refreshFileList();
+    });
+    console.log("Event listener for 'list_updated' registered successfully");
+  } catch (error) {
+    console.error("Failed to register event listener:", error);
+  }
+
+  // Set up clear button
+  clearListBtn.addEventListener("click", async () => {
+    await invoke("clear_copy_list");
+    // The event will trigger refreshFileList(), but we can also call it directly for immediate feedback
+    await refreshFileList();
+  });
+
+  // Initial load
+  await refreshFileList();
 });
